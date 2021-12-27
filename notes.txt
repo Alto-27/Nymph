@@ -1,0 +1,36 @@
+8 bit 6502 CPU
+	- Runs at 1.79 MHz
+	- 3 general purpose registers A/X/Y (All 8 bit)
+	- 3 Special registers
+		- P (status) 8 bit
+		- SP (stack pointer) 8 bit
+		- PC (program counter) 16 bit
+	
+2 KB onboard RAM
+	- 16 bit addressable memory space
+	- The other 62 KB is used for special I/O registers or cartridge ROM/RAM space if used at all
+
+PPU (Picture processing unit)
+	- 256 x 240 screen
+	- 8x8 tiles for background
+	- Up to 64 8x8 or 8x16 sprites for moving objects
+	- Pixel scrolling
+	
+APU (Audio Processing Unit)
+	- 2 pulse channels
+	- 1 triangle channel
+	- 1 noise channel
+	- 1 DMC (delta modulation) channel
+	
+Controllers
+	- Up, down, left, right, A, B, select, start
+	
+Cartridge boards + mappers
+	- Special hardware for each
+
+Need to learn:
+
+CPU --> instructions, addressing modes, registers and status flags, interrupts
+PPU --> PPU registers, pattern table, name table, sprites, rendering pipeline, and scrolling
+APU --> APU registers, and how to generate square/triangle waves
+iNES format --> most roms are in this format
