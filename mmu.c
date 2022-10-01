@@ -3,15 +3,25 @@
 #include <string.h>
 #include "mmu.h"
 
-#define CPU_MEM_SIZE 0x10000
-#define PPU_MEM_SIZE 0x4000
+#define CPU_MEM_SIZE 0xFFFF // 64 KiB for now, 2 KiB WRAM later
+#define PPU_MEM_SIZE 0x4000  // 16384 for now, 2 KiB VRAM later
 #define OAM_MEM_SIZE 256
 
-struct memory_map mmu;
+memory_map mmu;
 bool pbc = false;
 
 void loadROM(char * filename) {
     // load the rom
+}
+
+void loadOpcodes(uint8_t * opcodes, int length) {
+    // load opcodes for snake6502
+    // set reset vector to 0x8000 so program counter starts in the correct place
+    writeRAM(0xFFFC, 0x00);
+    writeRAM(0xFFFD, 0x80);
+    for (size_t i = 0; i < length; i++) {
+        writeRAM(0x8000 + i, opcodes[i]);
+    } 
 }
 
 void init_mmu(void) {
@@ -30,7 +40,7 @@ void clean_mem(void) {
     free(mmu.oam);
 }
 
-uint16_t indirect_X_index(struct nesCPU * cpu) {
+uint16_t indirect_X_index(nesCPU * cpu) {
     uint8_t rel_addr = readRAM(cpu->pc + 1);
     uint16_t address = (rel_addr + cpu->x) & 0xff;
     uint16_t address2 = (rel_addr + cpu->x + 1) & 0xff;
@@ -40,7 +50,7 @@ uint16_t indirect_X_index(struct nesCPU * cpu) {
     return final_addr;
 }
 
-uint16_t indirect_Y_index(struct nesCPU * cpu) {
+uint16_t indirect_Y_index(nesCPU * cpu) {
     uint8_t rel_addr = readRAM(cpu->pc+1);
     uint8_t low = readRAM(rel_addr);
     uint8_t high = readRAM((rel_addr + 1) & 0xff);
@@ -49,21 +59,21 @@ uint16_t indirect_Y_index(struct nesCPU * cpu) {
     return (address + cpu->y) & 0xffff;
 }
 
-uint16_t zero_page(struct nesCPU * cpu) {
+uint16_t zero_page(nesCPU * cpu) {
     return readRAM(cpu->pc+1);
 }
 
-uint16_t zero_page_X(struct nesCPU * cpu) {
+uint16_t zero_page_X(nesCPU * cpu) {
     uint8_t rel_addr = readRAM(cpu->pc+1);
     return (rel_addr + cpu->x) & 0xff;
 }
 
-uint16_t zero_page_Y(struct nesCPU * cpu) {
+uint16_t zero_page_Y(nesCPU * cpu) {
     uint8_t rel_addr = readRAM(cpu->pc+1);
     return (rel_addr + cpu->y) & 0xff;
 }
 
-uint16_t absolute_X(struct nesCPU * cpu) {
+uint16_t absolute_X(nesCPU * cpu) {
     uint8_t low = readRAM(cpu->pc+1);
     uint8_t high = readRAM(cpu->pc+2);
     uint16_t address = (high << 8) | low;
@@ -71,7 +81,7 @@ uint16_t absolute_X(struct nesCPU * cpu) {
     return (address + cpu->x) & 0xffff;
 }
 
-uint16_t absolute_Y(struct nesCPU * cpu) {
+uint16_t absolute_Y(nesCPU * cpu) {
     uint8_t low = readRAM(cpu->pc+1);
     uint8_t high = readRAM(cpu->pc+2);
     uint16_t address = (high << 8) | low;
@@ -79,7 +89,7 @@ uint16_t absolute_Y(struct nesCPU * cpu) {
     return (address + cpu->y) & 0xffff;
 }
 
-uint16_t absolute(struct nesCPU * cpu) {
+uint16_t absolute(nesCPU * cpu) {
     uint8_t low = readRAM(cpu->pc + 1);
     uint8_t high = readRAM(cpu->pc + 2);
     return (high << 8) | low;
@@ -87,4 +97,13 @@ uint16_t absolute(struct nesCPU * cpu) {
 
 bool pageBoundaryCross(void) {
     return pbc;
+}
+
+void writeRAM(uint16_t address, uint8_t value) {
+    // Need to handle mirroring
+    mmu.cpu_mem[address] = value;
+}
+
+uint8_t readRAM(uint16_t address) {
+    return mmu.cpu_mem[address];
 }
