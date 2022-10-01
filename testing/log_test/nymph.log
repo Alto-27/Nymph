@@ -1,0 +1,1 @@
+Use fprintf for logging in Nymph. Probably the best way to make the cpu log file to compare with nestest.log
