@@ -39,32 +39,44 @@
 #include "cpu.h"
 #include "mmu.h"
 
-struct nesCPU cpu;
+nesCPU cpu;
 
-void resetCPU(struct nesCPU * cpu) {
+void resetCPU(nesCPU * cpu) {
     cpu->a = 0;
     cpu->x = 0;
     cpu->y = 0;
-    uint8_t high = readRAM(0xffd);
-    uint8_t low = readRAM(0xffc);
-    cpu->pc = (high << 8) | low;     // start pc at reset vector
+    uint8_t high = readRAM(0xfffd);
+    uint8_t low = readRAM(0xfffc);
+    cpu->pc = (high << 8) | low;     // start pc at reset vector (0xfffc)
     cpu->sp = 0xfd;                  // start sp here b/c of nestest
-    cpu->status = 0x24;              // set unused and irq disable to true
+    cpu->status = 0x34;              // set unused and irq disable to true, flags register, processor status, P
+                                     // need to change for nestest, which differs in bits 4 and 5 which are unused
+    cpu->left = 0;
+    cpu->right = 0;
+    cpu->down = 0;
+    cpu->up = 0;
+    cpu->cycle = 7;
 }
 
-int interpret(struct nesCPU * cpu) {
+int interpret(nesCPU * cpu) {
     int cycles = 0;
+    uint16_t temp_addr = 0;
     // get next instruction
     // decode instruction
     // execute instruction
     // update pc and cycle count
     // return cycles
-    uint8_t opcode = readRAM(cpu->pc);
-    switch(opcode) {
+    cpu->opcode = readRAM(cpu->pc);
+
+    //char buffer[1024];
+    //snprintf(buffer, sizeof(buffer), "%04X %02X ", cpu->pc, cpu->opcode, );
+
+
+    switch(cpu->opcode) {
         case 0x00:                                  // BRK
             BRK(cpu);
             cycles = 7;
-            printf("Opcode: BRK | cycles: %d | PC: %X | flags: %X\n", cycles, cpu->pc, cpu->status);
+            //printf("Opcode: BRK | cycles: %d | PC: %X | flags: %X\n", cycles, cpu->pc, cpu->status);
             break;
         case 0x01:                                  // ORA ind, X
             ORA(cpu, indirect_X_index(cpu));
@@ -416,8 +428,11 @@ int interpret(struct nesCPU * cpu) {
         case 0x4B:
             break;
         case 0x4C:                                  // JMP abs
-            JMP_ABS(cpu, absolute(cpu));
+            temp_addr = absolute(cpu);
+            JMP_ABS(cpu, temp_addr);
             cycles = 3;
+            //C000  4C F5 C5  JMP $C5F5                       A:00 X:00 Y:00 P:24 SP:FD PPU:  0, 21 CYC:7
+            printf("%04X  %02X %02X %02X  JMP $%04X                       A:%02X X:%02X Y:%02X P:%02X SP:%02X PPU:  0, 21 CYC: ", cpu->pc, cpu->opcode, temp_addr & 0xFF, (temp_addr >> 8) & 0xFF, temp_addr);
             break;
         case 0x4D:                                  // EOR abs
             EOR(cpu, absolute(cpu));
@@ -1272,19 +1287,19 @@ int interpret(struct nesCPU * cpu) {
     return cycles;
 }
 
-void pushStack(struct nesCPU * cpu, uint8_t value) {
+void pushStack(nesCPU * cpu, uint8_t value) {
     writeRAM(0x100 + cpu->sp, value);
     cpu->sp -= 1;
     cpu->sp &= 0xff;         // probably not necessary
 }
 
-uint8_t popStack(struct nesCPU * cpu) {
+uint8_t popStack(nesCPU * cpu) {
     cpu->sp += 1;
     cpu->sp &= 0xff;         // probably not necessary
     return readRAM((0x100 + cpu->sp) & 0x1ff);   // to prevent overflow?
 }
 
-void updateFlag(struct nesCPU * cpu, uint8_t condition, uint8_t mask) {
+void updateFlag(nesCPU * cpu, uint8_t condition, uint8_t mask) {
     if(condition) {
         cpu->status |= mask;
     } else {
@@ -1292,12 +1307,12 @@ void updateFlag(struct nesCPU * cpu, uint8_t condition, uint8_t mask) {
     }
 }
 
-void updateNegZero(struct nesCPU * cpu, uint8_t value) {
+void updateNegZero(nesCPU * cpu, uint8_t value) {
     updateFlag(cpu, value >> 7, NEGATIVE_MASK);
     updateFlag(cpu, value == 0, ZERO_MASK);
 }
 
-void ADD(struct nesCPU * cpu, uint8_t value) {
+void ADD(nesCPU * cpu, uint8_t value) {
     uint16_t sum = cpu->a + value + (cpu->status & CARRY_MASK);
     uint8_t old_a = cpu->a;
     cpu->a = (uint8_t) sum;
@@ -1306,22 +1321,22 @@ void ADD(struct nesCPU * cpu, uint8_t value) {
     updateNegZero(cpu, cpu->a);
 }
 
-void ADC(struct nesCPU * cpu, uint16_t addr) {
+void ADC(nesCPU * cpu, uint16_t addr) {
     ADD(cpu, readRAM(addr));
 }
 
-void AND(struct nesCPU * cpu, uint16_t addr) {
+void AND(nesCPU * cpu, uint16_t addr) {
     cpu->a &= readRAM(addr);
     updateNegZero(cpu, cpu->a);
 }
 
-void ASL_A(struct nesCPU * cpu) {
+void ASL_A(nesCPU * cpu) {
     updateFlag(cpu, cpu->a >> 7, CARRY_MASK);
     cpu->a = cpu->a << 1;
     updateNegZero(cpu, cpu->a);
 }
 
-void ASL(struct nesCPU * cpu, uint16_t addr) {
+void ASL(nesCPU * cpu, uint16_t addr) {
     uint8_t shift = readRAM(addr);
     updateFlag(cpu, shift >> 7, CARRY_MASK);
     shift = shift << 1;
@@ -1329,7 +1344,7 @@ void ASL(struct nesCPU * cpu, uint16_t addr) {
     writeRAM(addr, shift);
 }
 
-int BCC(struct nesCPU * cpu) {
+int BCC(nesCPU * cpu) {
     int cycles = 2;
     uint16_t rel_addr = 2 + readRAM(cpu->pc + 1) + cpu->pc;
     if(!(cpu->status & CARRY_MASK)) {
@@ -1342,7 +1357,7 @@ int BCC(struct nesCPU * cpu) {
     return cycles;
 }
 
-int BCS(struct nesCPU * cpu) {
+int BCS(nesCPU * cpu) {
     int cycles = 2;
     uint16_t rel_addr = 2 + readRAM(cpu->pc + 1) + cpu->pc;
     if(cpu->status & CARRY_MASK) {
@@ -1355,7 +1370,7 @@ int BCS(struct nesCPU * cpu) {
     return cycles;
 }
 
-int BEQ(struct nesCPU * cpu) {
+int BEQ(nesCPU * cpu) {
     int cycles = 2;
     uint16_t rel_addr = 2 + readRAM(cpu->pc + 1) + cpu->pc;
     if(cpu->status & ZERO_MASK) {
@@ -1368,14 +1383,14 @@ int BEQ(struct nesCPU * cpu) {
     return cycles;
 }
 
-void BIT(struct nesCPU * cpu, uint16_t addr) {
+void BIT(nesCPU * cpu, uint16_t addr) {
     uint8_t bit_test = readRAM(addr);
     updateFlag(cpu, bit_test & OVERFLOW_MASK, OVERFLOW_MASK);
     updateFlag(cpu, bit_test & NEGATIVE_MASK, NEGATIVE_MASK);
     updateFlag(cpu, (bit_test & cpu->a) == 0, ZERO_MASK);
 }
 
-int BMI(struct nesCPU * cpu) {
+int BMI(nesCPU * cpu) {
     int cycles = 2;
     uint16_t rel_addr = 2 + readRAM(cpu->pc + 1) + cpu->pc;
     if(cpu->status & NEGATIVE_MASK) {
@@ -1388,7 +1403,7 @@ int BMI(struct nesCPU * cpu) {
     return cycles;
 }
 
-int BNE(struct nesCPU * cpu) {
+int BNE(nesCPU * cpu) {
     int cycles = 2;
     uint16_t rel_addr = 2 + readRAM(cpu->pc + 1) + cpu->pc;
     if(!(cpu->status & ZERO_MASK)) {
@@ -1401,7 +1416,7 @@ int BNE(struct nesCPU * cpu) {
     return cycles;
 }
 
-int BPL(struct nesCPU * cpu) {
+int BPL(nesCPU * cpu) {
     int cycles = 2;
     uint16_t rel_addr = 2 + readRAM(cpu->pc + 1) + cpu->pc;
     if(!(cpu->status & NEGATIVE_MASK)) {
@@ -1414,7 +1429,7 @@ int BPL(struct nesCPU * cpu) {
     return cycles;
 }
 
-void BRK(struct nesCPU * cpu) {
+void BRK(nesCPU * cpu) {
     pushStack(cpu, (uint8_t) (((cpu->pc + 2) & 0xff00) >> 8));    // need to handle 16 bit push
     pushStack(cpu, (uint8_t) ((cpu->pc + 2) & 0xff));
     pushStack(cpu, cpu->status | 0x30);       // push brk and unused flags set for some reason
@@ -1424,7 +1439,7 @@ void BRK(struct nesCPU * cpu) {
     cpu->status |= BRK_MASK;               // however only brk flag is set globally
 }
 
-int BVC(struct nesCPU * cpu) {
+int BVC(nesCPU * cpu) {
     int cycles = 2;
     uint16_t rel_addr = 2 + readRAM(cpu->pc + 1) + cpu->pc;
     if(!(cpu->status & OVERFLOW_MASK)) {
@@ -1437,7 +1452,7 @@ int BVC(struct nesCPU * cpu) {
     return cycles;
 }
 
-int BVS(struct nesCPU * cpu) {
+int BVS(nesCPU * cpu) {
     int cycles = 2;
     uint16_t rel_addr = 2 + readRAM(cpu->pc + 1) + cpu->pc;
     if(cpu->status & OVERFLOW_MASK) {
@@ -1450,79 +1465,79 @@ int BVS(struct nesCPU * cpu) {
     return cycles;
 }
 
-void CLC(struct nesCPU * cpu) {
+void CLC(nesCPU * cpu) {
     cpu->status &= ~CARRY_MASK;
 }
 
-void CLD(struct nesCPU * cpu) {
+void CLD(nesCPU * cpu) {
     cpu->status &= ~DECIMAL_MASK;
 }
 
-void CLI(struct nesCPU * cpu) {
+void CLI(nesCPU * cpu) {
     cpu->status &= ~IRQ_MASK;
 }
 
-void CLV(struct nesCPU * cpu) {
+void CLV(nesCPU * cpu) {
     cpu->status &= ~OVERFLOW_MASK;
 }
 
-void CMP(struct nesCPU * cpu, uint16_t addr) {
+void CMP(nesCPU * cpu, uint16_t addr) {
     uint8_t compare = cpu->a - readRAM(addr);
     updateFlag(cpu, compare >= 0, CARRY_MASK);
     updateNegZero(cpu, compare);
 }
 
-void CPX(struct nesCPU * cpu, uint16_t addr) {
+void CPX(nesCPU * cpu, uint16_t addr) {
     uint8_t compare = cpu->x - readRAM(addr);
     updateFlag(cpu, compare >= 0, CARRY_MASK);
     updateNegZero(cpu, compare);
 }
 
-void CPY(struct nesCPU * cpu, uint16_t addr) {
+void CPY(nesCPU * cpu, uint16_t addr) {
     uint8_t compare = cpu->y - readRAM(addr);
     updateFlag(cpu, compare >= 0, CARRY_MASK);
     updateNegZero(cpu, compare);
 }
 
-void DEC(struct nesCPU * cpu, uint16_t addr) {
+void DEC(nesCPU * cpu, uint16_t addr) {
     uint8_t decrement = readRAM(addr);
     decrement -= 1;
     writeRAM(addr, decrement);
     updateNegZero(cpu, decrement);
 }
 
-void DEX(struct nesCPU * cpu) {
+void DEX(nesCPU * cpu) {
     cpu->x -= 1;
     updateNegZero(cpu, cpu->x);
 }
 
-void DEY(struct nesCPU * cpu) {
+void DEY(nesCPU * cpu) {
     cpu->y -= 1;
     updateNegZero(cpu, cpu->y);
 }
 
-void EOR(struct nesCPU * cpu, uint16_t addr) {
+void EOR(nesCPU * cpu, uint16_t addr) {
     cpu->a ^= readRAM(addr);
     updateNegZero(cpu, cpu->a);
 }
 
-void INC(struct nesCPU * cpu, uint16_t addr) {
+void INC(nesCPU * cpu, uint16_t addr) {
     uint8_t newVal = readRAM(addr) + 1;
     writeRAM(addr, newVal);
     updateNegZero(cpu, newVal);
 }
 
-void INX(struct nesCPU * cpu) {
+void INX(nesCPU * cpu) {
     cpu->x += 1;
     updateNegZero(cpu, cpu->x);
 }
 
-void INY(struct nesCPU * cpu) {
+void INY(nesCPU * cpu) {
     cpu->y += 1;
     updateNegZero(cpu, cpu->y);
 }
 
-void JMP_IND(struct nesCPU * cpu) {
+void JMP_IND(nesCPU * cpu) {
     uint16_t ind_addr = (readRAM(cpu->pc + 2) << 8) | readRAM(cpu->pc + 1);
     uint8_t lsb = readRAM(ind_addr);
     uint8_t msb = readRAM(ind_addr + 1);
@@ -1532,39 +1547,39 @@ void JMP_IND(struct nesCPU * cpu) {
     cpu->pc = (msb << 8) | lsb;
 }
 
-void JMP_ABS(struct nesCPU * cpu, uint16_t addr) {
+void JMP_ABS(nesCPU * cpu, uint16_t addr) {
     cpu->pc = addr;
 }
 
-void JSR(struct nesCPU * cpu, uint16_t addr) {
+void JSR(nesCPU * cpu, uint16_t addr) {
     pushStack(cpu, (uint8_t) (((cpu->pc - 1) & 0xff00) >> 8));      // need to handle little endian 16 bit stack push
     pushStack(cpu, (uint8_t) ((cpu->pc - 1) & 0xff));
 
     cpu->pc = addr;
 }
 
-void LDA(struct nesCPU * cpu, uint16_t addr) {
+void LDA(nesCPU * cpu, uint16_t addr) {
     cpu->a = readRAM(addr);
     updateNegZero(cpu, cpu->a);
 }
 
-void LDX(struct nesCPU * cpu, uint16_t addr) {
+void LDX(nesCPU * cpu, uint16_t addr) {
     cpu->x = readRAM(addr);
     updateNegZero(cpu, cpu->x);
 }
 
-void LDY(struct nesCPU * cpu, uint16_t addr) {
+void LDY(nesCPU * cpu, uint16_t addr) {
     cpu->y = readRAM(addr);
     updateNegZero(cpu, cpu->y);
 }
 
-void LSR_A(struct nesCPU * cpu) {
+void LSR_A(nesCPU * cpu) {
     updateFlag(cpu, cpu->a & 0x1, CARRY_MASK);
     cpu->a = cpu->a >> 1;
     updateNegZero(cpu, cpu->a);
 }
 
-void LSR(struct nesCPU * cpu, uint16_t addr) {
+void LSR(nesCPU * cpu, uint16_t addr) {
     uint8_t shift = readRAM(addr);
     updateFlag(cpu, shift & 0x1, CARRY_MASK);
     shift = shift >> 1;
@@ -1574,29 +1589,29 @@ void LSR(struct nesCPU * cpu, uint16_t addr) {
 
 void NOP(uint16_t addr) {}
 
-void ORA(struct nesCPU * cpu, uint16_t addr) {
+void ORA(nesCPU * cpu, uint16_t addr) {
     cpu->a |= readRAM(addr);
     updateNegZero(cpu, cpu->a);
 }
 
-void PHA(struct nesCPU * cpu) {
+void PHA(nesCPU * cpu) {
     pushStack(cpu, cpu->a);
 }
 
-void PHP(struct nesCPU * cpu) {
+void PHP(nesCPU * cpu) {
     pushStack(cpu, cpu->status | 0x30);
 }
 
-void PLA(struct nesCPU * cpu) {
+void PLA(nesCPU * cpu) {
     cpu->a = popStack(cpu);
     updateNegZero(cpu, cpu->a);
 }
 
-void PLP(struct nesCPU * cpu) {
+void PLP(nesCPU * cpu) {
     cpu->status = popStack(cpu);
 }
 
-void ROL_A(struct nesCPU * cpu) {
+void ROL_A(nesCPU * cpu) {
     uint8_t old_carry = cpu->status & CARRY_MASK;
     updateFlag(cpu, cpu->a >> 7, CARRY_MASK);
     cpu->a = cpu->a << 1;
@@ -1604,7 +1619,7 @@ void ROL_A(struct nesCPU * cpu) {
     updateNegZero(cpu, cpu->a);
 }
 
-void ROL(struct nesCPU * cpu, uint16_t addr) {
+void ROL(nesCPU * cpu, uint16_t addr) {
     uint8_t old_carry = cpu->status & CARRY_MASK;
     uint8_t rotate = readRAM(addr);
     updateFlag(cpu, rotate >> 7, CARRY_MASK);
@@ -1614,7 +1629,7 @@ void ROL(struct nesCPU * cpu, uint16_t addr) {
     updateNegZero(cpu, rotate);
 }
 
-void ROR_A(struct nesCPU * cpu) {
+void ROR_A(nesCPU * cpu) {
     updateFlag(cpu, cpu->status & CARRY_MASK, NEGATIVE_MASK);
     uint8_t old_carry = (cpu->status & CARRY_MASK) << 7;
     updateFlag(cpu, cpu->a & 0x1, CARRY_MASK);
@@ -1623,7 +1638,7 @@ void ROR_A(struct nesCPU * cpu) {
     updateFlag(cpu, cpu->a == 0, ZERO_MASK);
 }
 
-void ROR(struct nesCPU * cpu, uint16_t addr) {
+void ROR(nesCPU * cpu, uint16_t addr) {
     updateFlag(cpu, cpu->status & CARRY_MASK, NEGATIVE_MASK);
     uint8_t old_carry = (cpu->status & CARRY_MASK) << 7;
     uint8_t rotate = readRAM(addr);
@@ -1634,72 +1649,72 @@ void ROR(struct nesCPU * cpu, uint16_t addr) {
     writeRAM(addr, rotate);
 }
 
-void RTI(struct nesCPU * cpu) {
+void RTI(nesCPU * cpu) {
     cpu->status = popStack(cpu);
     uint8_t low = popStack(cpu);
     uint8_t high = popStack(cpu);
     cpu->pc = (high << 8) | low;
 }
 
-void RTS(struct nesCPU * cpu) {
+void RTS(nesCPU * cpu) {
     uint8_t low = popStack(cpu);
     uint8_t high = popStack(cpu);
     cpu->pc = (high << 8) | low;
 }
 
-void SBC(struct nesCPU * cpu, uint16_t addr) {
+void SBC(nesCPU * cpu, uint16_t addr) {
     ADD(cpu, ~readRAM(addr));
 }
 
-void SEC(struct nesCPU * cpu) {
+void SEC(nesCPU * cpu) {
     cpu->status |= CARRY_MASK;
 }
 
-void SED(struct nesCPU * cpu) {
+void SED(nesCPU * cpu) {
     cpu->status |= DECIMAL_MASK;
 }
 
-void SEI(struct nesCPU * cpu) {
+void SEI(nesCPU * cpu) {
     cpu->status |= IRQ_MASK;
 }
 
-void STA(struct nesCPU * cpu, uint16_t addr) {
+void STA(nesCPU * cpu, uint16_t addr) {
     writeRAM(addr, cpu->a);
 }
 
-void STX(struct nesCPU * cpu, uint16_t addr) {
+void STX(nesCPU * cpu, uint16_t addr) {
     writeRAM(addr, cpu->x);
 }
 
-void STY(struct nesCPU * cpu, uint16_t addr) {
+void STY(nesCPU * cpu, uint16_t addr) {
     writeRAM(addr, cpu->y);
 }
 
-void TAX(struct nesCPU * cpu) {
+void TAX(nesCPU * cpu) {
     cpu->x = cpu->a;
     updateNegZero(cpu, cpu->x);
 }
 
-void TAY(struct nesCPU * cpu) {
+void TAY(nesCPU * cpu) {
     cpu->y = cpu->a;
     updateNegZero(cpu, cpu->y);
 }
 
-void TSX(struct nesCPU * cpu) {
+void TSX(nesCPU * cpu) {
     cpu->x = cpu->sp;
     updateNegZero(cpu, cpu->x);
 }
 
-void TXA(struct nesCPU * cpu) {
+void TXA(nesCPU * cpu) {
     cpu->a = cpu->x;
     updateNegZero(cpu, cpu->a);
 }
 
-void TXS(struct nesCPU * cpu) {
+void TXS(nesCPU * cpu) {
     cpu->sp = cpu->x;
 }
 
-void TYA(struct nesCPU * cpu) {
+void TYA(nesCPU * cpu) {
     cpu->a = cpu->y;
     updateNegZero(cpu, cpu->a);
 }
@@ -1724,20 +1739,20 @@ void TYA(struct nesCPU * cpu) {
 void JAM() {}
 
 // DEC + CMP
-void DCP(struct nesCPU * cpu, uint16_t addr) {
+void DCP(nesCPU * cpu, uint16_t addr) {
     DEC(cpu, addr);
     CMP(cpu, addr);
 }
 
 // INC + SBC
-void ISC(struct nesCPU * cpu, uint16_t addr) {
+void ISC(nesCPU * cpu, uint16_t addr) {
     INC(cpu, addr);
     SBC(cpu, addr);
 }
 
 // LDA/TSX
 // M AND SP -> A, X, SP
-void LAS(struct nesCPU * cpu, uint16_t addr) {
+void LAS(nesCPU * cpu, uint16_t addr) {
     cpu->sp &= readRAM(addr);
     cpu->a = cpu->sp;
     TSX(cpu);
@@ -1745,32 +1760,32 @@ void LAS(struct nesCPU * cpu, uint16_t addr) {
 
 // LDA + TAX
 // M -> A -> X
-void LAX(struct nesCPU * cpu, uint16_t addr) {
+void LAX(nesCPU * cpu, uint16_t addr) {
     cpu->a = readRAM(addr);
     cpu->x = cpu->a;
     updateNegZero(cpu, cpu->x);
 }
 
 // RLA + AND
-void RLA(struct nesCPU * cpu, uint16_t addr) {
+void RLA(nesCPU * cpu, uint16_t addr) {
     ROL(cpu, addr);
     AND(cpu, addr);
 }
 
 // ROR + ADC
-void RRA(struct nesCPU * cpu, uint16_t addr) {
+void RRA(nesCPU * cpu, uint16_t addr) {
     ROR(cpu, addr);
     ADC(cpu, addr);
 }
 
 // A & X -> M
-void SAX(struct nesCPU * cpu, uint16_t addr) {
+void SAX(nesCPU * cpu, uint16_t addr) {
     writeRAM(addr, cpu->a & cpu->x);
 }
 
 // CMP and DEX, flags set by CMP
 // (A AND X) - oper -> X
-void SBX(struct nesCPU * cpu, uint16_t addr) {
+void SBX(nesCPU * cpu, uint16_t addr) {
     uint8_t compare = (cpu->a & cpu->x) - readRAM(addr);
     updateFlag(cpu, compare >= 0, CARRY_MASK);
     updateNegZero(cpu, compare);
@@ -1779,7 +1794,7 @@ void SBX(struct nesCPU * cpu, uint16_t addr) {
 
 // ASL + ORA
 // Do ASL on M, update carry using M, A OR M -> A, update neg and zero using A
-void SLO(struct nesCPU * cpu, uint16_t addr) {
+void SLO(nesCPU * cpu, uint16_t addr) {
     uint8_t shift = readRAM(addr);
     updateFlag(cpu, shift >> 7, CARRY_MASK);
     shift = shift << 1;
@@ -1790,7 +1805,7 @@ void SLO(struct nesCPU * cpu, uint16_t addr) {
 
 // LSR + EOR
 // DO LSR on M, update carry using M, A XOR M -> A, update neg and zero using A
-void SRE(struct nesCPU * cpu, uint16_t addr) {
+void SRE(nesCPU * cpu, uint16_t addr) {
     uint8_t shift = readRAM(addr);
     updateFlag(cpu, shift & 0x1, CARRY_MASK);
     shift = shift >> 1;
@@ -1800,6 +1815,6 @@ void SRE(struct nesCPU * cpu, uint16_t addr) {
 }
 
 // Same as SBC immediate
-void USBC(struct nesCPU * cpu, uint16_t addr) {
+void USBC(nesCPU * cpu, uint16_t addr) {
     SBC(cpu, addr);
 }
